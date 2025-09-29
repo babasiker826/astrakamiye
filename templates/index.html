@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FreeByte Otomatik Transfer</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        .status-card { transition: all 0.3s; }
+        .status-card:hover { transform: translateY(-2px); box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
+        .log-success { color: #198754; }
+        .log-error { color: #dc3545; }
+        .log-warning { color: #ffc107; }
+        .log-info { color: #0dcaf0; }
+        .blink { animation: blink 1s infinite; }
+        @keyframes blink { 50% { opacity: 0.5; } }
+    </style>
+</head>
+<body>
+    <div class="container mt-4">
+        <div class="row">
+            <div class="col-12">
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <h1><i class="fas fa-robot me-2"></i>FreeByte Otomatik Transfer</h1>
+                    <div id="status-indicator" class="d-flex align-items-center">
+                        <span id="status-text" class="me-2">Durum:</span>
+                        <span id="status-badge" class="badge bg-secondary">Yükleniyor...</span>
+                    </div>
+                </div>
+
+                <!-- Durum Kartları -->
+                <div class="row mb-4">
+                    <div class="col-md-4">
+                        <div class="card status-card border-primary">
+                            <div class="card-body">
+                                <h5 class="card-title"><i class="fas fa-clock me-2"></i>Son Çalışma</h5>
+                                <p class="card-text" id="last-run">{{ last_run if last_run else "Henüz çalışmadı" }}</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card status-card border-info">
+                            <div class="card-body">
+                                <h5 class="card-title"><i class="fas fa-calendar me-2"></i>Sonraki Çalışma</h5>
+                                <p class="card-text" id="next-run">
+                                    {% if next_run is string %}
+                                        {{ next_run }}
+                                    {% else %}
+                                        {{ next_run.strftime('%Y-%m-%d %H:%M:%S') }}
+                                    {% endif %}
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card status-card border-success">
+                            <div class="card-body">
+                                <h5 class="card-title"><i class="fas fa-users me-2"></i>Hesaplar</h5>
+                                <p class="card-text">{{ hesaplar|length }} aktif hesap</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Kontrol Butonları -->
+                <div class="row mb-4">
+                    <div class="col-12">
+                        <div class="card">
+                            <div class="card-body">
+                                <h5 class="card-title"><i class="fas fa-play-circle me-2"></i>Kontroller</h5>
+                                <button id="run-btn" class="btn btn-primary me-2" onclick="runOnce()">
+                                    <i class="fas fa-play me-1"></i>Şimdi Çalıştır
+                                </button>
+                                <button id="clear-logs-btn" class="btn btn-warning me-2" onclick="clearLogs()">
+                                    <i class="fas fa-trash me-1"></i>Logları Temizle
+                                </button>
+                                <button class="btn btn-info" onclick="refreshStatus()">
+                                    <i class="fas fa-sync-alt me-1"></i>Yenile
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Hesaplar ve Hedef -->
+                <div class="row mb-4">
+                    <div class="col-md-6">
+                        <div class="card">
+                            <div class="card-header">
+                                <i class="fas fa-user-circle me-2"></i>Aktif Hesaplar
+                            </div>
+                            <div class="card-body">
+                                <div class="table-responsive">
+                                    <table class="table table-sm">
+                                        <thead>
+                                            <tr>
+                                                <th>Numara</th>
+                                                <th>PIN</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for hesap in hesaplar %}
+                                            <tr>
+                                                <td>{{ hesap[0] }}</td>
+                                                <td>***{{ hesap[1][-2:] }}</td>
+                                            </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card">
+                            <div class="card-header">
+                                <i class="fas fa-bullseye me-2"></i>Hedef Numara
+                            </div>
+                            <div class="card-body">
+                                <h4 class="text-center text-primary">{{ target }}</h4>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Loglar -->
+                <div class="row">
+                    <div class="col-12">
+                        <div class="card">
+                            <div class="card-header d-flex justify-content-between align-items-center">
+                                <span><i class="fas fa-list-alt me-2"></i>İşlem Logları</span>
+                                <small class="text-muted">Son 20 kayıt</small>
+                            </div>
+                            <div class="card-body">
+                                <div id="log-container" style="max-height: 400px; overflow-y: auto;">
+                                    {% for log in logs %}
+                                    <div class="log-entry mb-2">
+                                        <small class="text-muted">[{{ log.timestamp }}]</small>
+                                        <span class="log-{{ log.type }}"> {{ log.message }}</span>
+                                    </div>
+                                    {% else %}
+                                    <p class="text-muted">Henüz log bulunmuyor...</p>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        function updateStatus(data) {
+            // Durum göstergesi
+            const statusBadge = document.getElementById('status-badge');
+            if (data.is_running) {
+                statusBadge.className = 'badge bg-warning blink';
+                statusBadge.textContent = 'Çalışıyor';
+                document.getElementById('run-btn').disabled = true;
+            } else {
+                statusBadge.className = 'badge bg-success';
+                statusBadge.textContent = 'Hazır';
+                document.getElementById('run-btn').disabled = false;
+            }
+
+            // Zaman bilgileri
+            if (data.last_run) {
+                document.getElementById('last-run').textContent = data.last_run;
+            }
+            if (data.next_run) {
+                document.getElementById('next-run').textContent = data.next_run;
+            }
+
+            // Logları güncelle
+            updateLogs(data.logs);
+        }
+
+        function updateLogs(logs) {
+            const container = document.getElementById('log-container');
+            if (!logs || logs.length === 0) return;
+
+            container.innerHTML = '';
+            logs.slice(-20).reverse().forEach(log => {
+                const logEntry = document.createElement('div');
+                logEntry.className = 'log-entry mb-2';
+                logEntry.innerHTML = `
+                    <small class="text-muted">[${log.timestamp}]</small>
+                    <span class="log-${log.type}"> ${log.message}</span>
+                `;
+                container.appendChild(logEntry);
+            });
+
+            // Otomatik scroll
+            container.scrollTop = container.scrollHeight;
+        }
+
+        async function runOnce() {
+            try {
+                const response = await fetch('/run_once');
+                const data = await response.json();
+                alert(data.message);
+                refreshStatus();
+            } catch (error) {
+                alert('İstek sırasında hata oluştu: ' + error);
+            }
+        }
+
+        async function clearLogs() {
+            if (confirm('Logları temizlemek istediğinizden emin misiniz?')) {
+                try {
+                    const response = await fetch('/clear_logs');
+                    const data = await response.json();
+                    alert(data.message);
+                    refreshStatus();
+                } catch (error) {
+                    alert('İstek sırasında hata oluştu: ' + error);
+                }
+            }
+        }
+
+        async function refreshStatus() {
+            try {
+                const response = await fetch('/status');
+                const data = await response.json();
+                updateStatus(data);
+            } catch (error) {
+                console.error('Durum güncelleme hatası:', error);
+            }
+        }
+
+        // Sayfa yüklendiğinde ve her 10 saniyede bir durumu güncelle
+        document.addEventListener('DOMContentLoaded', function() {
+            refreshStatus();
+            setInterval(refreshStatus, 10000); // 10 saniyede bir
+        });
+    </script>
+</body>
+</html>
